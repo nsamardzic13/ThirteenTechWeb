@@ -14,7 +14,8 @@ permissions:
   pull-requests: write  # Needed to add PR comments
 
 jobs:
-  build:
+  # Job for setting up environment and installing dependencies
+  setup_and_install:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -46,31 +47,16 @@ jobs:
         with:
           node-version: "16"
 
-      - name: Cache Node.js modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.npm
-            ~/.cache
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
       - name: Install Node.js dependencies
         run: npm install
 
-      - name: Install GitHub CLI
-        run: sudo apt-get install gh
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Run CDK Diff (only for pull requests)
-        if: github.event_name == 'pull_request'
+  # Job for running CDK diff
+  cdk_diff:
+    runs-on: ubuntu-latest
+    needs: setup_and_install
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Run CDK Diff
         id: cdk_diff
         run: |
           cdk diff || echo "No differences found." > cdk_diff_output.txt
@@ -84,6 +70,18 @@ jobs:
           DIFF_OUTPUT=$(cdk diff || echo "No differences found.")
           gh pr comment ${{ github.event.pull_request.number }} --body "$DIFF_OUTPUT"
 
-      - name: Deploy to AWS (only for push to main or after PR merge)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # Job for deploying to AWS
+  cdk_deploy:
+    runs-on: ubuntu-latest
+    needs: setup_and_install
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to AWS
         run: cdk deploy --require-approval=never
