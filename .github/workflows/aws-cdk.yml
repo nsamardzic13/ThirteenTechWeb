@@ -47,9 +47,6 @@ jobs:
         with:
           node-version: "16"
 
-      - name: Install Node.js dependencies
-        run: npm install
-
   # Job for running CDK diff
   cdk_diff:
     runs-on: ubuntu-latest
