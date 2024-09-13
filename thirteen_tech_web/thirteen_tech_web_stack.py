@@ -40,7 +40,7 @@ class ThirteenTechWebStack(Stack):
         )
         
         # Output to Custom Domain
-        CfnOutput(self, "BucketWebsiteURL",
+        CfnOutput(self, "CustomDomain",
             value=config['customDomain'],
             description="URL for custom domain"
         )
