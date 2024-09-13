@@ -35,6 +35,12 @@ class ThirteenTechWebStack(Stack):
 
         # Output the S3 website URL
         CfnOutput(self, "BucketWebsiteURL",
-            value=config['customDomain'],
+            value=bucket.bucket_website_url,
             description="URL for the static website hosted in S3"
+        )
+        
+        # Output to Custom Domain
+        CfnOutput(self, "BucketWebsiteURL",
+            value=config['customDomain'],
+            description="URL for custom domain"
         )
