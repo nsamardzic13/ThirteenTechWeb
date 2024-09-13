@@ -23,48 +23,68 @@ class ThirteenTechWebStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # Create a Route 53 hosted zone (or use an existing one)
+        hosted_zone = route53.HostedZone.from_lookup(
+            self, "HostedZone", domain_name=config["customDomain"]
+        )
+
+        # Reference the manually created ACM certificate by ARN
+        certificate = acm.DnsValidatedCertificate(
+            self,
+            "WebsiteCertificate",
+            domain_name=config["customDomain"],
+            subject_alternative_names=["*." + config["customDomain"]],
+            hosted_zone=hosted_zone,
+            region="us-east-1",  # cloudfront forced
+        )
+        certificate.apply_removal_policy(RemovalPolicy.DESTROY)
+        CfnOutput(self, "Certificate", value=certificate.certificate_arn)
+
         # Create an S3 bucket for static website hosting
         bucket = s3.Bucket(
             self,
             "StaticWebsiteBucket",
             bucket_name=config["bucketName"],
-            website_index_document="index.html",
-            public_read_access=False,  # Disable direct public access, will use CloudFront
-            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            website_index_document="index.html",  # Index document
+            public_read_access=True,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ACLS,  # Allow public access but block ACLs
             removal_policy=RemovalPolicy.DESTROY,  # Destroy bucket on stack deletion
+            auto_delete_objects=True,
         )
-
-        # Create a Route53 hosted zone (or use an existing one)
-        hosted_zone = route53.HostedZone.from_lookup(
-            self, "HostedZone", domain_name=config["customDomain"]  # Your custom domain
-        )
-
-        # Create an ACM certificate for HTTPS
-        certificate = acm.Certificate(
-            self,
-            "WebsiteCertificate",
-            domain_name=config["customDomain"],
-            validation=acm.CertificateValidation.from_dns(hosted_zone),
-        )
+        CfnOutput(self, "BucketCfn", value=bucket.bucket_name)
 
         # Create a CloudFront distribution with the S3 bucket as the origin
         distribution = cloudfront.Distribution(
             self,
             "CloudFrontDistribution",
+            certificate=certificate,
             default_root_object="index.html",
-            domain_names=[config["customDomain"]],
-            certificate=certificate,  # Associate the ACM certificate with the distribution
-            default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3BucketOrigin(bucket),  # Use S3BucketOrigin instead of S3Origin
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,  # Ensure HTTPS
-            ),
+            domain_names=[config["customDomain"], "www." + config["customDomain"]],
+            minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
+            default_behavior={
+                "origin": origins.S3BucketOrigin(bucket),
+                "compress": True,
+                "allowed_methods": cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                "viewer_protocol_policy": cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            },
         )
+        CfnOutput(self, "CloudFrontDistributionCfn", value=distribution.distribution_id)
 
-        # Add an A record in Route53 pointing to the CloudFront distribution
+        # Add an A record in Route 53 pointing to the CloudFront distribution
         route53.ARecord(
             self,
             "AliasRecord",
             zone=hosted_zone,
+            record_name=config["customDomain"],
+            target=route53.RecordTarget.from_alias(
+                targets.CloudFrontTarget(distribution)
+            ),
+        )
+        route53.ARecord(
+            self,
+            "AliasRecordwww",
+            zone=hosted_zone,
+            record_name="www." + config["customDomain"],
             target=route53.RecordTarget.from_alias(
                 targets.CloudFrontTarget(distribution)
             ),
@@ -83,15 +103,6 @@ class ThirteenTechWebStack(Stack):
         # Output the CloudFront distribution domain
         CfnOutput(
             self,
-            "CloudFrontDistributionDomain",
+            "CloudFrontDistributionDomainCfn",
             value=distribution.distribution_domain_name,
-            description="The CloudFront distribution domain name",
-        )
-
-        # Output the custom domain
-        CfnOutput(
-            self,
-            "CustomDomain",
-            value=f"https://{config['customDomain']}",
-            description="Custom domain for the static website",
         )
